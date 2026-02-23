@@ -127,4 +127,302 @@ group by p.id_produto, p.nome_produto
 select *, 
 sum(Faturamento_Individual) over (order by Faturamento_Individual desc) as FaturamentoAcumuladoProgressivo
 from Faturamento_Individual_Produtos
+
 order by Faturamento_Individual desc;
+
+-- 11. Ticket Médio por Tipo de Cliente:
+-- Qual é o ticket médio (valor médio gasto por pedido/venda) separado por tipo de cliente (Cooperativa vs. Produtor Direto)?
+
+select  c.nome_cliente,
+round(sum(v.quantidade * p.preco_unitario) / count(v.id_venda), 2) as Ticket_Médio
+from vendas v 
+join clientes c on v.id_cliente = c.id_cliente
+join produtos p on v.id_produto = p.id_produto
+group by c.tipo;
+
+
+-- 12. Clientes Inativos (Churn):
+-- A diretoria quer saber quem comprou em 2023, mas não comprou nada em 2024. Liste o nome desses clientes.
+
+with clientes2023 as (
+    select c.id_cliente,c.nome_cliente, substr(v.data_venda, 1, 4)
+    from vendas v 
+    join clientes c on v.id_cliente = c.id_cliente
+    where substr(v.data_venda, 1, 4) = '2023'
+    group by c.nome_cliente, c.id_cliente
+),
+clientes2024 as (
+    select c.id_cliente,c.nome_cliente, substr(v.data_venda, 1, 4)
+    from vendas v 
+    join clientes c on v.id_cliente = c.id_cliente
+    where substr(v.data_venda, 1, 4) = '2024'
+    group by c.nome_cliente, c.id_cliente
+)
+select c23.id_cliente, c23.nome_cliente
+from clientes2023 c23
+left join clientes2024 c24 on c23.id_cliente = c24.id_cliente
+where c24.id_cliente is null;
+
+
+-- 13. Recência de Compra (Dias desde a última compra):
+-- Para cada cliente, mostre o Nome, a data da última compra que ele fez e quantos dias se passaram desde essa última compra até a 
+-- data atual (ou até '2024-12-31' para simularmos o fim do ano).
+
+with ultima_data_compra as (
+    select c.id_cliente,
+    c.nome_cliente, 
+    max(v.data_venda) as ultimo_dia
+    from vendas v 
+    join clientes c on v.id_cliente = c.id_cliente
+    group by c.nome_cliente, c.id_cliente
+    order by max(v.data_venda) desc
+)
+select id_cliente,
+nome_cliente,
+julianday('2024-12-31') - julianday(ultimo_dia) as dias_desde_ultima_compra
+from ultima_data_compra
+order by dias_desde_ultima_compra desc;
+
+
+-- 14. Os "Gigantes" (Acima da Média):
+-- Quais clientes têm um faturamento total que é maior que o faturamento médio de todos os clientes da empresa?
+
+with total_gasto_cliente as (
+    select c.id_cliente, 
+    c.nome_cliente,
+    sum(v.quantidade * p.preco_unitario) as total_cliente from vendas v
+    join clientes c on  v.id_cliente = c.id_cliente
+    join produtos p on v.id_produto = p.id_produto
+    group by c.id_cliente, c.nome_cliente
+),
+media_geral_gasto as (
+    select 
+    avg(total_cliente) as media_geral
+    from total_gasto_cliente
+)
+select id_cliente, nome_cliente
+from total_gasto_cliente
+where total_cliente > (select media_geral from media_geral_gasto);
+
+
+-- 15. Crescimento Ano a Ano (YoY - Year over Year):
+-- Compare o faturamento total do ano de 2023 com o de 2024. Mostre em uma linha: Faturamento 2023, 
+-- Faturamento 2024 e a variação percentual de crescimento.
+
+with total_2023 as (
+    select
+    sum(v.quantidade * p.preco_unitario) as total_23 from vendas v
+    join produtos p on v.id_produto = p.id_produto
+    where v.data_venda >= '2023-01-01' and v.data_venda < '2024-01-01'
+),
+total_2024 as (
+    select
+    sum(v.quantidade * p.preco_unitario) as total_24 from vendas v
+    join produtos p on v.id_produto = p.id_produto
+    where v.data_venda >= '2024-01-01' and v.data_venda < '2025-01-01'
+)
+select total_23, total_24,
+round(((total_24 - total_23) * 100.0) / total_23, 2) as variacao_percentual
+from total_2023 t23
+cross join total_2024;
+
+
+-- 16. Média Móvel de 3 Meses:
+-- Apresente o faturamento mês a mês de 2024 e, ao lado, a média móvel dos últimos 3 meses (o mês atual e os dois anteriores).
+--  O Agro usa muito isso para suavizar as variações de safra.
+
+with total2024 as (
+    select substr(v.data_venda, 1, 7) as mes,
+    sum(v.quantidade * p.preco_unitario) as total_2024 from vendas v
+    join produtos p on v.id_produto = p.id_produto
+    where v.data_venda >= '2024-01-01' and v.data_venda < '2025-01-01'
+    group by substr(v.data_venda, 1, 7)
+    order by substr(v.data_venda, 1, 7) asc
+)
+select mes,
+total_2024,
+round(avg(total_2024) over (ORDER BY mes ROWS BETWEEN 2 PRECEDING AND CURRENT ROW),2 ) as media_movel
+from total2024;
+
+
+-- 17. O Pior Mês de 2024:
+-- Escreva uma query que retorne diretamente apenas uma linha: o mês de 2024 que teve o menor faturamento, junto com o valor faturado.
+
+select substr(v.data_venda, 1, 7) as mes,
+sum(v.quantidade * p.preco_unitario) as valor_faturado from vendas v
+join produtos p on v.id_produto = p.id_produto
+where v.data_venda >= '2024-01-01' and v.data_venda < '2025-01-01'
+group by substr(v.data_venda, 1, 7)
+order by valor_faturado asc
+limit 1;
+
+
+-- 18. Penetração de Tecnologia:
+-- Quais Regiões (nome_regiao) já realizaram compras de produtos da categoria 'Tecnologia'? Mostre a região e o total faturado apenas nessa categoria.
+
+select r.nome_regiao,
+sum(v.quantidade * p.preco_unitario) as total_faturado
+from regioes r
+join clientes c on r.id_regiao = c.id_regiao
+join vendas v on c.id_cliente = v.id_cliente
+join produtos p on v.id_produto = p.id_produto
+where p.categoria = 'Tecnologia'
+group by r.id_regiao, r.nome_regiao;
+
+
+-- 19. Vendas Cruzadas (Cross-Sell de Sementes e Químicos):
+-- Identifique os clientes que já compraram ambas as categorias: 'Sementes' E 'Químicos'. Retorne apenas o nome do cliente.
+
+select c.nome_cliente from clientes c
+join vendas v on c.id_cliente = v.id_cliente
+join produtos p on v.id_produto = p.id_produto
+where p.categoria in ('Sementes','Químicos')
+group by c.nome_cliente
+having count(distinct p.categoria) = 2;
+
+
+-- 20. Percentual de Representatividade Interna da Região:
+-- Para cada produto vendido dentro da região "Sul", qual foi o seu faturamento e quantos % esse produto representa 
+-- no faturamento TOTAL apenas da região Sul?
+
+with total_por_produto as (
+    select p.nome_produto,r.nome_regiao,
+    sum(v.quantidade * p.preco_unitario) as total_faturado_produto
+    from regioes r
+    join clientes c on r.id_regiao = c.id_regiao
+    join vendas v on c.id_cliente = v.id_cliente
+    join produtos p on v.id_produto = p.id_produto
+    where r.nome_regiao = 'Sul'
+    group by p.nome_produto, r.nome_regiao
+)
+select *,
+round((total_faturado_produto * 100.00) / sum(total_faturado_produto) over (), 2) as porcentagem_no_total
+from total_por_produto;
+
+
+-- 21. Clientes em Risco (Churn):
+-- Identifique clientes que fizeram compras em 2023, mas não realizaram nenhuma compra em 2024.
+
+with clientes2023 as (
+    select c.id_cliente, c.nome_cliente from vendas v
+    join clientes c on v.id_cliente = c.id_cliente
+    where v.data_venda >= '2023-01-01' and v.data_venda <'2024-01-01'
+    group by c.id_cliente,c.nome_cliente
+),
+clientes2024 as (
+    select distinct id_cliente
+    from vendas
+    where data_venda >= '2024-01-01'
+)
+select c23.* from clientes2023 c23
+left join clientes2024 c24 on c23.id_cliente = c24.id_cliente
+where c24.id_cliente is null;
+
+
+-- 22. O "Embaixador" da Marca:
+-- Qual cliente comprou a maior variedade de produtos diferentes (contagem de id_produto distintos) em toda a história?
+
+select 
+c.nome_cliente,
+count(distinct p.id_produto) as conta_de_produtos
+from clientes c
+join vendas v on c.id_cliente = v.id_cliente
+join produtos p on v.id_produto = p.id_produto
+group by c.id_cliente, c.nome_cliente
+order by conta_de_produtos desc
+limit 1;
+
+
+-- 23. Intervalo Médio de Compras (Cycle Time):
+-- Para o cliente que mais compra, qual a média de dias entre um pedido e outro?
+
+with campeao as (
+    select c.id_cliente,
+    count(v.id_venda) as qtde_compras
+    from vendas v
+    join clientes c on v.id_cliente = c.id_cliente
+    group by c.id_cliente
+    order by qtde_compras desc
+    limit 1
+),
+historico_compras as (
+    select v.data_venda 
+    from vendas v
+    where v.id_cliente = (select id_cliente from campeao)
+),
+dias_entre_compras as (
+    select data_venda,
+    lag(data_venda) over (order by data_venda) as data_compra_anterior
+    from historico_compras
+)
+select avg(julianday(data_venda) - julianday(data_compra_anterior)) as media_dias_entre_compras
+from dias_entre_compras
+WHERE data_compra_anterior IS NOT NULL;
+
+
+-- 24. Produtos de "Cauda Longa":
+-- Liste os produtos que representam os últimos 5% do faturamento total. (Aqueles que vendem muito pouco e talvez não valha a pena ter no estoque).
+
+with total_produtos as (
+    select 
+    p.nome_produto,
+    sum(p.preco_unitario * v.quantidade) as faturamento_item
+    from vendas v
+    join produtos p on v.id_produto = p.id_produto
+    GROUP BY p.nome_produto
+),
+calculo_acumulado as (
+    select nome_produto,
+    faturamento_item,
+    sum(faturamento_item) over (order by faturamento_item asc) as faturamento_acumulado,
+    sum(faturamento_item) over() as faturamento_total
+    from total_produtos
+),
+percentual as (
+    select 
+        nome_produto,
+        round((faturamento_acumulado * 100.0) / faturamento_total, 2) as quanto_representa
+    from calculo_acumulado
+)
+select *
+from percentual
+where quanto_representa <= 5.00;
+
+
+-- 25. Ranking de Vendas por Região (Top 3):
+-- Para cada região, liste os 3 produtos mais vendidos (em valor).
+
+with total_por_regiao as (
+    select 
+    r.id_regiao,
+    r.nome_regiao,
+    p.nome_produto,
+    sum(p.preco_unitario * v.quantidade) as total from 
+    regioes r
+    join clientes c on r.id_regiao = c.id_regiao
+    join vendas v on c.id_cliente = v.id_cliente
+    join produtos p on v.id_produto = p.id_produto
+    group by r.id_regiao, r.nome_regiao, p.nome_produto
+),
+ranque_por_regiao as (
+    select *,
+    dense_rank() over (PARTITION BY nome_regiao order by total desc) as ranque
+    from total_por_regiao
+)
+select * from ranque_por_regiao
+where ranque <= 3;
+
+
+-- 26. Sazonalidade de Categoria:
+-- Em qual mês do ano a categoria 'Sementes' atinge seu pico de faturamento?
+
+select 
+p.categoria,
+substr(v.data_venda, 1, 7) as mes,
+sum(p.preco_unitario * v.quantidade) as total from 
+vendas v 
+join produtos p on v.id_produto = p.id_produto
+where p.categoria = 'Sementes'
+group by p.categoria, substr(v.data_venda, 1, 7)
+order by total desc
+limit 1;
