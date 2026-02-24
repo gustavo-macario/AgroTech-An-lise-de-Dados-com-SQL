@@ -426,3 +426,96 @@ where p.categoria = 'Sementes'
 group by p.categoria, substr(v.data_venda, 1, 7)
 order by total desc
 limit 1;
+
+-- 27. Ticket Médio por Tipo de Cliente:
+-- Compare o ticket médio (Faturamento Total / Total de Pedidos) entre 'Produtor Direto' e 'Cooperativa'.
+
+select 
+c.tipo,
+sum(v.quantidade * p.preco_unitario) as faturamento_total,
+count(v.id_venda) as total_pedidos,
+sum(v.quantidade * p.preco_unitario) / count(v.id_venda) as ticket_médio
+ from clientes c
+
+join vendas v on c.id_cliente = v.id_cliente
+
+join produtos p on v.id_produto = p.id_produto
+
+where c.tipo in ('Produtor Direto', 'Cooperativa')
+
+group by c.tipo
+
+
+-- 28. Impacto de Devolução (Simulação):
+-- Se todos os pedidos com menos de 10 itens fossem cancelados, quanto o faturamento total de 2024 seria reduzido (em %)
+
+with total_2024 as (
+select sum(v.quantidade * p.preco_unitario) as total2024
+from vendas v 
+
+join produtos p on v.id_produto = p.id_produto
+
+where v.data_venda >= '2024-01-01'
+and v.data_venda < '2025-01-01'
+),
+
+menos_de_10_produtos as (
+select 
+sum(v.quantidade * p.preco_unitario) as total_com_10_produtos
+
+from vendas v 
+
+join produtos p on v.id_produto = p.id_produto
+
+where v.quantidade < 10 and 
+substr(v.data_venda, 1, 4) = '2024'
+)
+
+select 
+round((total_com_10_produtos * 100.00) / total2024, 2) as faturamento_reduzido
+from menos_de_10_produtos, total_2024
+
+
+
+-- 29. Clientes de "Compra Única":
+-- Qual a porcentagem de clientes que compraram duas vezes ou menos e nunca mais voltaram?
+
+with duas_vezes as (
+select count(*) as total_clientes_2
+from (
+    select id_cliente
+    from vendas
+    group by id_cliente
+    having count(*) <= 2
+) as clientes_com_2_vendas
+),
+
+total as (
+select 
+     count(distinct id_cliente) as total_clientes
+from vendas
+)
+
+select 
+round((total_clientes_2 * 100.0) / total_clientes, 2) as porcentagem
+from duas_vezes, total
+
+
+-- 30. Relatório Executivo Acumulado (Running Total):
+-- Crie uma query que mostre o faturamento mês a mês de 2024, mas com uma coluna extra de Faturamento Acumulado.
+
+with totais as (
+    select 
+        substr(v.data_venda, 1, 7) as mes,
+        sum(v.quantidade * p.preco_unitario) as total
+    from vendas v
+    join produtos p on v.id_produto = p.id_produto
+    where v.data_venda >= '2024-01-01'
+      and v.data_venda < '2025-01-01'
+    group by substr(v.data_venda, 1, 7)
+)
+
+select *,
+    sum(total) over (order by mes) as faturamento_acumulado
+from totais
+order by mes
